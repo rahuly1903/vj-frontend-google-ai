@@ -30,7 +30,7 @@ export default function ReportPage() {
   const config = useMemo(() => REPORTS.find(r => r.id === reportId), [reportId]);
 
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
-  const [reportData, setReportData] = useState<{ kpis: any; rows: any[] } | null>(null);
+  const [reportData, setReportData] = useState<Record<string, any>[] | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -46,6 +46,15 @@ export default function ReportPage() {
     setReportData(null);
     setError(null);
   }, [reportId]);
+
+  const kpis = useMemo(() => {
+    if (!reportData || reportData.length === 0) return null;
+    const totalSales = reportData.reduce((sum, r) => sum + (r['total sale amount'] || 0), 0);
+    const totalCost = reportData.reduce((sum, r) => sum + (r['total cost value'] || 0), 0);
+    const totalProfit = reportData.reduce((sum, r) => sum + (r['total profit'] || 0), 0);
+    const marginPercent = totalSales > 0 ? (totalProfit / totalSales) * 100 : 0;
+    return { totalSales, totalCost, totalProfit, marginPercent };
+  }, [reportData]);
 
   if (!hasMounted) return null;
 
@@ -71,23 +80,23 @@ export default function ReportPage() {
   const generateReport = async () => {
     setIsGenerating(true);
     setError(null);
-    
+
     try {
-      const response = await fetch(`${API_BASE_URL}/reports/${reportId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/gross-margin-report`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          database: BRAND_CONFIG[brand].db,
-          params: filterValues
-        })
+          body: JSON.stringify({database: BRAND_CONFIG[brand].db, ...filterValues})
       });
 
       if (!response.ok) {
         throw new Error('Unable to fetch report data');
       }
 
-      const data = await response.json();
-      setReportData(data);
+      const json = await response.json();
+      if (!json.success) {
+        throw new Error(json.message || 'Report returned unsuccessful response');
+      }
+      setReportData(json.data);
     } catch (err: any) {
       console.error('Report Error:', err);
       setError('Unable to fetch report data');
@@ -150,25 +159,25 @@ export default function ReportPage() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <KPICard 
           label="Total Sales" 
-          value={reportData?.kpis.totalSales || 0} 
+          value={kpis?.totalSales ?? 0} 
           format="currency" 
           loading={isGenerating} 
         />
         <KPICard 
           label="Total Cost" 
-          value={reportData?.kpis.totalCost || 0} 
+          value={kpis?.totalCost ?? 0} 
           format="currency" 
           loading={isGenerating} 
         />
         <KPICard 
           label="Total Profit" 
-          value={reportData?.kpis.totalProfit || 0} 
+          value={kpis?.totalProfit ?? 0} 
           format="currency" 
           loading={isGenerating} 
         />
         <KPICard 
           label="Margin %" 
-          value={reportData?.kpis.marginPercent || 0} 
+          value={kpis?.marginPercent ?? 0} 
           format="percent" 
           loading={isGenerating} 
         />
@@ -270,7 +279,7 @@ export default function ReportPage() {
                 <span className="text-[10px] uppercase tracking-widest font-bold">Report Results</span>
               </div>
               <span className="text-[9px] uppercase tracking-widest opacity-40">
-                {reportData ? `Showing ${reportData.rows.length} records` : 'No data loaded'}
+                {reportData ? `Showing ${reportData.length} records` : 'No data loaded'}
               </span>
             </div>
             
@@ -291,37 +300,42 @@ export default function ReportPage() {
                 </div>
               )}
 
-              {reportData && reportData.rows.length === 0 && (
+              {reportData && reportData.length === 0 && (
                 <div className="h-96 flex flex-col items-center justify-center bg-[#141414]/5 space-y-4">
                   <Info className="w-8 h-8 opacity-10" />
                   <p className="text-xs font-serif italic opacity-40">No data found for the selected criteria.</p>
                 </div>
               )}
 
-              {reportData && reportData.rows.length > 0 && (
+              {reportData && reportData.length > 0 && (
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="border-b border-[#141414]/10 bg-[#141414]/5">
-                      <th className="px-6 py-4 text-[10px] uppercase tracking-widest font-bold opacity-50">Group / Item</th>
+                      <th className="px-6 py-4 text-[10px] uppercase tracking-widest font-bold opacity-50">Department</th>
+                      <th className="px-6 py-4 text-[10px] uppercase tracking-widest font-bold opacity-50 text-right">Qty</th>
+                      <th className="px-6 py-4 text-[10px] uppercase tracking-widest font-bold opacity-50 text-right">Weight</th>
                       <th className="px-6 py-4 text-[10px] uppercase tracking-widest font-bold opacity-50 text-right">Sales</th>
                       <th className="px-6 py-4 text-[10px] uppercase tracking-widest font-bold opacity-50 text-right">Cost</th>
                       <th className="px-6 py-4 text-[10px] uppercase tracking-widest font-bold opacity-50 text-right">Profit</th>
                       <th className="px-6 py-4 text-[10px] uppercase tracking-widest font-bold opacity-50 text-right">Margin %</th>
+                      <th className="px-6 py-4 text-[10px] uppercase tracking-widest font-bold opacity-50 text-right">Markup %</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#141414]/5">
-                    {reportData.rows.map((row, idx) => (
+                    {reportData.map((row, idx) => (
                       <tr key={idx} className="hover:bg-[#141414]/5 transition-colors group">
                         <td className="px-6 py-4">
-                          <p className="text-sm font-serif italic">{row.group}</p>
-                          {row.InvoiceNumber && <span className="text-[9px] uppercase tracking-tighter opacity-30">#{row.InvoiceNumber}</span>}
+                          <p className="text-sm font-serif italic">{row['department name'] || row['department'] || '—'}</p>
                         </td>
-                        <td className="px-6 py-4 text-right text-sm font-mono">{formatValue(row.totalSaleAmount, 'currency')}</td>
-                        <td className="px-6 py-4 text-right text-sm font-mono opacity-50">{formatValue(row.totalCostValue, 'currency')}</td>
-                        <td className="px-6 py-4 text-right text-sm font-mono">{formatValue(row.totalProfit, 'currency')}</td>
-                        <td className={`px-6 py-4 text-right text-sm font-mono ${getMarginColor(row.totalMargin)}`}>
-                          {formatValue(row.totalMargin, 'percent')}
+                        <td className="px-6 py-4 text-right text-sm font-mono">{formatValue(row['total qty'], 'number')}</td>
+                        <td className="px-6 py-4 text-right text-sm font-mono opacity-50">{formatValue(row['total wt'], 'number')}</td>
+                        <td className="px-6 py-4 text-right text-sm font-mono">{formatValue(row['total sale amount'], 'currency')}</td>
+                        <td className="px-6 py-4 text-right text-sm font-mono opacity-50">{formatValue(row['total cost value'], 'currency')}</td>
+                        <td className="px-6 py-4 text-right text-sm font-mono">{formatValue(row['total profit'], 'currency')}</td>
+                        <td className={`px-6 py-4 text-right text-sm font-mono ${getMarginColor(row['total margin'])}`}>
+                          {formatValue(row['total margin'], 'percent')}
                         </td>
+                        <td className="px-6 py-4 text-right text-sm font-mono">{formatValue(row['total markup'], 'percent')}</td>
                       </tr>
                     ))}
                   </tbody>
